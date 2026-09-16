@@ -1,0 +1,13 @@
+data/incoming/*
+data/processed/*
+!data/incoming/.gitkeep
+!data/processed/.gitkeep
+
+archive/*.csv
+
+logs/
+plugins/    
+.env
+__pycache__/
+*.pyc
+.DS_Store
