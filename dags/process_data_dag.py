@@ -2,14 +2,41 @@ from datetime import datetime, timedelta
 import os
 
 import pandas as pd
+import re
+import string
 from airflow import DAG
 from airflow.operators.bash import BashOperator
-from airflow.operators.empty import EmptyOperator
-from airflow.operators.python import BranchPythonOperator
+from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.sensors.filesystem import FileSensor
+from airflow.datasets import Dataset
+from airflow.utils.task_group import TaskGroup
+
 
 INCOMING_FILE = "/opt/airflow/data/incoming/tiktok_google_play_reviews.csv"
+NULLS_FILLED_FILE = "/opt/airflow/data/processed/tiktok_reviews_nulls_filled.csv"
+SORTED_FILE = "/opt/airflow/data/processed/tiktok_reviews_sorted.csv"
+CLEAN_FILE = "/opt/airflow/data/processed/tiktok_reviews_clean.csv"
+processed_reviews = Dataset(f"file://{CLEAN_FILE}")
 
+def replace_nulls() -> None:
+    df = pd.read_csv(INCOMING_FILE)
+    df = df.fillna("-").replace("null", "-").replace(r"^\s*$", "-", regex=True)
+    df.to_csv(NULLS_FILLED_FILE, index=False)
+
+def sort_by_at() -> None:
+    df = pd.read_csv(NULLS_FILLED_FILE)
+    df['at'] = pd.to_datetime(df['at'], errors='coerce')
+    df = df.sort_values('at')
+    df.to_csv(SORTED_FILE, index=False)
+
+def clean_content() -> None:
+    junk = re.compile(rf"[^\w\s{re.escape(string.punctuation)}]+", flags=re.UNICODE)
+    df = pd.read_csv(SORTED_FILE)
+    df["content"] = (
+        df["content"].fillna("-").astype(str).str.replace(junk, "", regex=True)
+    )
+    df["content"] = df["content"].replace(r"^\s*$", "-", regex=True)
+    df.to_csv(CLEAN_FILE, index=False)
 
 def choose_branch() -> str:
     if not os.path.exists(INCOMING_FILE) or os.path.getsize(INCOMING_FILE) == 0:
@@ -19,7 +46,7 @@ def choose_branch() -> str:
     if df.empty:
         return "log_empty_file"
 
-    return "process_data"
+    return "process_data.replace_nulls"
 
 
 with DAG(
