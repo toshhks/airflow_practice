@@ -80,6 +80,14 @@ with DAG(
         bash_command="bash /opt/airflow/scripts/log_empty.sh ",
     )
 
-    process_data = EmptyOperator(task_id="process_data")
+    with TaskGroup(group_id="process_data") as process_data:
+        t1 = PythonOperator(task_id="replace_nulls", python_callable=replace_nulls)
+        t2 = PythonOperator(task_id="sort_by_at", python_callable=sort_by_at)
+        t3 = PythonOperator(
+            task_id="clean_content",
+            python_callable=clean_content,
+            outlets=[processed_reviews],
+        )
+        t1 >> t2 >> t3
 
     wait_for_file >> branch >> [log_empty_file, process_data]
