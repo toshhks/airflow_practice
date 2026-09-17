@@ -16,7 +16,7 @@
 # under the License.
 #
 
-# Basic Airflow cluster configuration for CeleryExecutor with Redis and PostgreSQL.
+# Lightweight local stack: LocalExecutor (no Celery worker/Redis/triggerer by default).
 #
 # WARNING: This configuration is for local development. Do not use it in a production deployment.
 #
@@ -53,13 +53,17 @@ x-airflow-common:
   # build: .
   environment:
     &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__WEBSERVER__WORKERS: '1'
+    AIRFLOW__CORE__PARALLELISM: '2'
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: '2'
+    AIRFLOW__SCHEDULER__PARSING_PROCESSES: '1'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
@@ -82,8 +86,6 @@ x-airflow-common:
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
-    redis:
-      condition: service_healthy
     postgres:
       condition: service_healthy
 
@@ -102,6 +104,8 @@ services:
       retries: 5
       start_period: 5s
     restart: always
+    mem_limit: 256m
+    cpus: "0.50"
 
   redis:
     # Redis is limited to 7.2-bookworm due to licencing change
@@ -116,6 +120,10 @@ services:
       retries: 50
       start_period: 30s
     restart: always
+    profiles:
+      - celery
+    mem_limit: 64m
+    cpus: "0.25"
 
   mongo:
     image: mongo:7
@@ -129,6 +137,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    mem_limit: 512m
+    cpus: "0.50"
 
   airflow-webserver:
     <<: *airflow-common
@@ -139,9 +149,11 @@ services:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 8
+      start_period: 120s
     restart: always
+    mem_limit: 1536m
+    cpus: "1.0"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -154,9 +166,11 @@ services:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 30s
+      retries: 8
+      start_period: 60s
     restart: always
+    mem_limit: 1536m
+    cpus: "1.0"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -180,6 +194,10 @@ services:
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
     restart: always
+    profiles:
+      - celery
+    mem_limit: 768m
+    cpus: "0.75"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -195,6 +213,10 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    profiles:
+      - triggerer
+    mem_limit: 512m
+    cpus: "0.50"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -263,6 +285,8 @@ services:
     user: "0:0"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}:/sources
+    mem_limit: 768m
+    cpus: "1.0"
 
   airflow-cli:
     <<: *airflow-common
@@ -294,6 +318,8 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    mem_limit: 256m
+    cpus: "0.25"
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
